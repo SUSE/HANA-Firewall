@@ -1,0 +1,10 @@
+## Name: HANA SAP support
+## Description: (see SAP HANA Master Guide)
+## The connection is not active by default because it is required only in
+## certain support cases. To find out how to open a support connection,
+## see the SAP HANA Administration Guide
+
+# space separated list of allowed TCP ports
+# xx = HANA Instance
+# TCP="3xx09"
+TCP="3__INST_NUM__09"

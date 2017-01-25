@@ -1,0 +1,11 @@
+## Name: SAP HANA studio
+## Description: (see SAP HANA Master Guide)
+## "The connection to the instance agent acts as an administrative
+## channel for low-level access to the SAP HANA instance to allow
+## features such as starting or stopping of the SAP HANA database.
+## The protocol used for this connection is SQLDBC (ODBC/JDBC)."
+
+# space separated list of allowed TCP ports
+# xx = HANA Instance
+# TCP="5xx13 5xx14"
+TCP="5__INST_NUM__13 5__INST_NUM__14"

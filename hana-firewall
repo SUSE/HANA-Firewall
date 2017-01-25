@@ -1,0 +1,594 @@
+#!/usr/bin/perl
+#
+# Configure and apply SUSE firewall configuration for SAP HANA systems.
+# The script generates firewall rules according to HANA firewall configuration file
+# and feed the rules to SUSE firewall via a firewall script.
+# The command line action "apply" will generate the configuration and activate SUSE firewall immediately.
+#
+# The firewall rules are generated according to: /etc/sysconfig/{hana-firewall,hana-firewall.d}
+#
+# Written by Markus Guertler (SUSE @ SAP Linux Lab).
+# Further maintained by Howard Guo (SUSE).
+# License: GPL 2.0
+#
+use strict;
+use warnings;
+use Data::Dumper;
+use POSIX qw(strftime);
+
+# Global settings
+my $iptables_cmd = '/usr/sbin/iptables';
+my $ip_cmd = '/sbin/ip';
+my $config_dir = '/etc/sysconfig';
+my $hana_firewall_d_dir = '/etc/hana-firewall.d';
+my $config_file_settings = '/etc/sysconfig/hana-firewall';
+my $susefw_config_file = '/etc/sysconfig/SuSEfirewall2';
+my $fw_script = '/etc/hana-firewall.d/generated_hana_firewall_script';
+my $fw_rules_bak = '/etc/hana-firewall.d/.firewall_rules_backup';
+my $hana_interface_prefix = 'hana_interface_';
+
+# When invoked manually, the user must hold UID root.
+if ( $< != 0 ) {
+    die "Please run hana-firewall program as user root.\n";
+}
+
+# Read action name from command line
+my $help_text = "Generate HANA firewall configuration script for integration with SUSE firewall.
+Usage: $0 <apply|unapply|status|dry-run|help>
+
+    apply       Generate HANA firewall rules and activate firewall immediately.
+    unapply     Remove HANA firewall rules immediately.
+    status      Report whether or not HANA firewall configuration is enabled with SUSE firewall.
+    dry-run     Print (without executing) iptables commands that will set up HANA firewall.
+    help        Print this help message.
+
+Read 'man hana-firewall' for more information.\n";
+
+my $action = $ARGV[0];
+if (!defined($action)) {
+    # No action
+    print $help_text;
+    exit 1;
+} elsif (lc($action) eq 'help') {
+    print $help_text;
+    exit 0;
+} elsif (lc($action) eq 'dry-run') {
+    print "If you run '$0 apply', I will activate SUSE firewall with these rules made for SAP HANA:\n";
+    print join("\n", &make_iptables_cmds);
+    print "\n";
+    exit 0;
+} elsif (lc($action) eq 'status') {
+    &action_status;
+} elsif (lc($action) eq 'unapply') {
+    &action_unapply;
+} elsif (lc($action) eq 'apply') {
+    &action_apply;
+} else {
+    # Unrecognised action
+    die "Unknown action: $action\n\n$help_text";
+}
+
+# Make series of iptables commands that will fully implement the HANA firewall.
+sub make_iptables_cmds {
+    # Perform a preliminary validation to make sure that critical config/command files are present.
+    foreach my $location ($config_dir, $hana_firewall_d_dir, $config_file_settings, $susefw_config_file) {
+        if (! -r $location) {
+            die "ERROR: Critical configuration file '$location' is missing or not readable.\n";
+        }
+    }
+    # Read configuration files and build internal configuration structure
+    my $cfg = &create_config_structure;
+    # Create interface -> port mappings
+    my $mappings = &create_interface_port_mappings($cfg);
+    return &construct_iptables_cmds($cfg, $mappings);
+};
+
+# Return 1 if SUSE firewall service is active. Otherwise return 0.
+sub is_susefw_active {
+    return system('systemctl status SuSEfirewall2.service > /dev/null 2> /dev/null') == 0;
+}
+
+# Construct a text piece ("fw_customrules") based on $rules_txt with @cmd merged into "fw_custom_after_chain_creation" and return.
+sub merge_into_customrules {
+    my ($existing_txt, @cmds) = @_;
+    # Split text into lines, because each iptable command occupies exactly one line.
+    my @lines = split(/\n/, $existing_txt);
+    # Find the line number of "fw_custom_after_chain_creation" for new iptable commands to be placed
+    my $lineno_chain = -1;
+    foreach my $lineno (0..$#lines){
+        if ($lines[$lineno] =~ /fw_custom_after_chain_creation.*{/) {
+            $lineno_chain = $lineno;
+            last;
+        }
+    }
+    # Figure out new commands to merge
+    my @insert_cmds;
+    foreach my $cmd (@cmds) {
+        my $is_new_cmd = 1;
+        foreach my $line (@lines) {
+            if (index($line, $cmd) != -1) {
+                $is_new_cmd = 0;
+                last;
+            }
+        }
+        if ($is_new_cmd) {
+            push(@insert_cmds, $cmd);
+        }
+    }
+    # Put new commands into the lines immediately following "after_chain"
+    if ($#insert_cmds > 0) {
+        splice(@lines, $lineno_chain+1, 0, @insert_cmds);
+    }
+    return join("\n", @lines);
+}
+
+# Remove hana-firewall iptable rules from fw_customrules file text. Return the new text.
+sub remove_from_customrules {
+    my ($existing_txt, @cmds) = @_;
+    # Split text into lines, because each iptable command occupies exactly one line.
+    my @lines = split(/\n/, $existing_txt);
+    my @ret;
+    foreach my $line (@lines) {
+        my $is_hana_cmd = 0;
+        foreach my $cmd (@cmds) {
+            if (index($line, $cmd) != -1) {
+                $is_hana_cmd = 1;
+                last;
+            }
+        }
+        if (!$is_hana_cmd) {
+            push(@ret, $line);
+        }
+    }
+    return join("\n", @ret);
+}
+
+# Return the current value of FW_CUSTOMRULES in /etc/sysconfig/SuSEfirewall2. Return an empty string if it is not yet set.
+sub get_susefw_customrules {
+    my $ret = qx{sed -n 's/^FW_CUSTOMRULES="\\(.*\\)"/\\1/p' /etc/sysconfig/SuSEfirewall2};
+    chomp($ret);
+    return $ret;
+}
+
+# Read the content of custom-rules file. Return undef if custom-rules file is not used. 
+sub get_customrules_txt {
+    my $customrules_file = &get_susefw_customrules;
+    if ($customrules_file eq "") {
+        return undef;
+    }
+    open(my $fh, $customrules_file) or return undef;
+    local $/ = undef;
+    my $txt = <$fh>;
+    close $fh;
+    return $txt;
+}
+
+# Return 1 if SUSE firewall custom script has all of the HANA firewall rules, otherwise return 0;
+sub is_hanafw_in_place {
+    my $existing_txt = &get_customrules_txt;
+    if (!defined $existing_txt) {
+        return 0;
+    }
+    my $new_txt = &merge_into_customrules($existing_txt, &make_iptables_cmds);
+    chomp $existing_txt;
+    chomp $new_txt;
+    return $new_txt eq $existing_txt;
+}
+
+# Set FW_CUSTOMRULES value in /etc/sysconfig/SuSEfirewall2. Return 1 on success, or 0 on failure.
+sub set_susefw_customrules {
+    my $strval = shift;
+    $strval =~ s/\//\\\//g;
+    my $sedcmd = q#sed -i 's/^FW_CUSTOMRULES=.*$/FW_CUSTOMRULES="# . $strval . q#"/' # . $susefw_config_file;
+    return system($sedcmd) == 0;
+}
+
+# Report firewall status. Return 0 if firewall appears to be active.
+sub action_status {
+    my $fw_active = &is_susefw_active;
+    my $hanafw_in_place = &is_hanafw_in_place;
+    if (!$fw_active) {
+        print "SUSE firewall serivce is not active, therefore HANA firewall rules are not applied.\n";
+    }
+    if (!$hanafw_in_place) {
+        print "Firewall script is not up-to-date.\n";
+    }
+    if ($fw_active && $hanafw_in_place) {
+        print "HANA firewall is active. Everything is OK.\n";
+        exit 0;
+    } else {
+        die "HANA firewall is not operational.\n";
+    }
+};
+
+# (Re)apply all HANA firewall rules. Return 0 on success.
+sub action_apply {
+    # If custom firewall script does not yet exist, create it.
+    my $customrules_file = &get_susefw_customrules;
+    if ($customrules_file eq "" || ! -e get_susefw_customrules) {
+        $customrules_file = $fw_script;
+        my $file_body = qq/# Automatically generated by hana-firewall.
+# The script will be activated via SUSE firewall service. You do not need to run this script manually.
+# Learn more about hana-firewall in "man 7 hana-firewall".
+fw_custom_after_chain_creation() {
+true
+}
+fw_custom_before_port_handling() {
+true
+}
+fw_custom_before_masq() {
+true
+}
+fw_custom_before_denyall() {
+true
+}
+fw_custom_after_finished() {
+true
+}
+/;
+        open my $fh, '>', $customrules_file or die "Cannot write into $customrules_file.\n";
+        print $fh $file_body;
+        close $fh;
+        # Tell SUSE firewall to use this script from now on
+        &set_susefw_customrules($customrules_file);
+    }
+    # Put firewall rules into the custom-rules file
+    my $existing_txt = &get_customrules_txt;
+    if (! defined $existing_txt) {
+        die("Failed to read custom rules file.\n");
+    }
+    # Write down all the calculated firewall rules applied in this run so that they can be reverted later
+    my $fh;
+    my @iptable_cmds = &make_iptables_cmds;
+    open $fh, '>', $fw_rules_bak or die("Cannot write into $fw_rules_bak\n");
+    print $fh join("\n", @iptable_cmds);
+    close $fh;
+    # Construct SUSE firewall custom rules file
+    open $fh, '>', $customrules_file or die("Cannot write into $customrules_file\n");;
+    print $fh &merge_into_customrules($existing_txt, @iptable_cmds);
+    close $fh;
+    # Restart SUSE firewall to load new firewall rules
+    print "Restarting SUSE firewall to apply HANA firewall rules...\n";
+    my $susefw_restarted = system("systemctl restart SuSEfirewall2.service") == 0;
+    if ($susefw_restarted) {
+        print "HANA firewall rules have been successfully installed.\n";
+        exit 0;
+    } else {
+        die "Failed to restart SuSEfirewall2.service, HANA firewall rules are not applied.\n";
+    }
+};
+
+# Remove all HANA firewall rules. Return 0 on success.
+sub action_unapply {
+    my $customrules_file = &get_susefw_customrules;
+    # Remove HANA iptable commands from custom-rules
+    my $existing_txt = &get_customrules_txt;
+    if (defined $existing_txt) {
+        my $fh;
+        # Read about the iptable commands that were applied
+        open $fh, $fw_rules_bak or goto APPLY;
+        local $/ = undef;
+        my @bak_rules = split(/\n/, <$fh>);
+        close $fh;
+        # Remove those iptable commands from custom rules file
+        open $fh, '>', $customrules_file;
+        print $fh &remove_from_customrules($existing_txt, @bak_rules);
+        close $fh;
+    }
+APPLY:
+    # Restart SUSE firewall to apply
+    if (&is_susefw_active) {
+        print "Restarting SUSE firewall to erase HANA firewall rules...\n";
+        my $susefw_restarted = system("systemctl restart SuSEfirewall2.service") == 0;
+        if (!$susefw_restarted) {
+            die "Failed to restart SuSEfirewall2.service, HANA firewall rules may still linger in iptables.\n";
+        }
+    }
+    print "HANA firewall rules have been erased successfully.\n";
+    exit 0;
+};
+
+# Return all network interface names.
+sub list_net_interfaces {
+    my @nic_names;
+    open my $iflist, '-|', "$ip_cmd -o link show" or die "ERROR: Failed to run ip command to list network interfaces.\n";
+    while (<$iflist>) {
+        push(@nic_names, $1) if ($_ =~ /^\d+:\s+([\w\-_]+):/);
+    }
+    close $iflist;
+    return @nic_names;
+}
+
+# Read firewall settings, services, and interface configuration from /etc/sysconfig/ files.
+sub create_config_structure
+{
+    my $config;
+    my @nic_names = &list_net_interfaces;
+	#
+	# 1. Process global settings from file hana_firewall_settings
+	#
+	
+	# read config
+	my $config_hash_ref = &_read_config_file($config_file_settings);
+	
+	# create structure
+	foreach my $key (keys %$config_hash_ref)
+	{
+		my $value = $config_hash_ref->{$key};
+		if ($key eq 'OPEN_ALL_SSH') {
+            $value = lc($value);
+            if ($value ne 'yes' && $value ne 'no') {
+                die("$key must be set to either 'yes' or 'no'.\n")
+            }
+            $config->{settings}->{open_all_ssh} = $config_hash_ref->{$key};
+        }elsif ($key eq 'HANA_SYSTEMS') {
+            my @systems = split (/\s+/,$value);
+            # Check HANA_SYSTEM names
+            foreach (@systems)
+            {
+                die("ERROR: $key contains malformed HANA system name: $_",2) if ($_ !~ /[A-Z0-9]{3,3}\d{2,2}/);
+            }
+            # TBD: Check if HANA systems really exists!
+            die("ERROR: $key must contain at least one HANA system name in the format <SID><INSTANCE_NR>.\n",2) if (!@systems);
+            $config->{settings}->{hana_systems} = \@systems;
+		} elsif ($key =~ /^INTERFACE_\d+$/) {
+            if ($value)
+            {
+                $key =~ /^INTERFACE_(\d+)/;
+                if (! grep{$_ eq $value} @nic_names) {
+                    die("ERROR: Interface $value doesn't exist on the system.\n");
+                }
+                $config->{settings}->{interface}->{$1}->{name}=$value;
+            }
+		} elsif ($key =~ /^INTERFACE_\d+_SERVICES$/) {
+            if ($value)
+            {
+                $key =~ /^INTERFACE_(\d+)/;
+                my @services = split (/\s+/,$value);
+                $config->{settings}->{interface}->{$1}->{services}=\@services;
+            }
+		} else {
+            die("ERROR: Unrecognised parameter '$key', is it a spelling mistake?\n")
+		}
+	}
+	
+	#
+	# 2. Process HANA servoces and user services from hana_firewall.d directory
+	#
+	opendir (DIR, $hana_firewall_d_dir) or die("ERROR: Cannot open directory $hana_firewall_d_dir");
+	while (my $service_name = readdir DIR)
+	{
+		next if ($service_name =~ m/^\./ or $service_name =~ /^create_new_service$/ or $service_name =~ /^generated_hana_firewall_script$/);
+		my $file_path = $hana_firewall_d_dir."/".$service_name;
+        
+        # Read & parse the service file
+        my $service_hash_ref = &_read_config_file($file_path);
+        
+        # Cycle through the config hash and add the service as well as the tcp and udp ports
+        foreach my $key (keys %$service_hash_ref)
+        {
+            my $value = $service_hash_ref->{$key};
+            if ($key eq 'TCP' || $key eq 'UDP') {
+                my @ports = split(/\s+/,$value);
+                foreach (@ports)
+                {
+                    die("ERROR: Port description $_ in wrong format for service $key in file $file_path!\n") if ($_ !~ /^(\d+|__INST_NUM\+?1?__)+(:(\d+|__INST_NUM\+?1?__)+)?$/);
+                }
+                $config->{services}->{$service_name}->{tcp}=\@ports if ($key eq "TCP");
+                $config->{services}->{$service_name}->{udp}=\@ports if ($key eq "UDP");
+            } else {
+                die("ERROR: Parameter $key is not accepted in file $file_path. Perhaps a spelling mistake?\n",2)
+            }
+        }
+	}
+	closedir (DIR);
+	
+	#
+	# 3. Post validation checks of the config data structure
+	#
+	
+	# Validate interface names and service names
+	my $count;
+	foreach my $iface_name (keys %{$config->{settings}->{interface}})
+	{
+		my $iface = $config->{settings}->{interface}->{$iface_name};
+		# Interface names
+		die("No interface name specified for interface number: ".$count) if (!$iface->{name});
+		
+		if (! grep{$_ eq $iface->{name}} @nic_names) {
+            die("Interface $iface_name not found or not configured on this system!\n");
+		}
+		
+		if (!$iface->{services}) {
+            die("No services specified for interface $iface->{name}.\n")
+		}
+		
+		# Service names
+		foreach my $service (@{$iface->{services}})
+		{
+			my($service_name,$network) = split(/:/,$service);
+			# _translate_service dies on error
+			&_translate_service($config, $service_name);
+			if ($network and $network !~ /\d+\.\d+\.\d+\.\d+\/?\d*/) {
+                die("ERROR: Network $network for service $service_name, defined for interface $iface->{name} in wrong format.\n");
+			}
+		}
+		
+		$count++;
+		
+	}
+	
+	# print("Configuration data structure: \n".Dumper($config));
+    return $config;
+}
+
+# Reads and parses configuration file $file
+# Expects: filename
+# Returns: reference to a hash structure with configuration parameters and raw values as they occur in the config file
+sub _read_config_file
+{
+	my $file = shift;
+	my %config_hash;
+	
+	my ($line);
+	open my $conf_fh, "<", $file or die("Couldn't open config file $file for reading.\n");
+	while (<$conf_fh>)
+	{
+		$line++;
+		chomp ($_);
+		next if ($_ =~ /^#/ || $_ =~ /^\s*$/);
+		if ($_ !~ /^\s*([A-Z0-9_]+)=\"(.*)\"\s*/)
+		{
+			die("ERROR: Syntax error in config file $file near line $line.\n");
+		}
+		
+		$config_hash{$1}=$2;
+	}
+	close $conf_fh;
+	return (\%config_hash);
+}
+
+# Looks up a service from /etc/services or a manual specified service and translates it into a TCP & UDP ports
+# Expects: $service_name
+# Returns: reference to array @tcp_ports, reference to array @udp_ports
+sub _translate_service
+{
+	my ($config, $service_name) = @_;
+	my (@tcp_ports,@udp_ports);
+	#
+	# 1. Do an lookup for a internal defined service
+	#
+	foreach my $predefined_service (keys %{$config->{services}})
+	{
+		# If service_name exists in configuration or service name eq to 'HANA_*' and current service is a HANA service 
+		if ($service_name eq $predefined_service or ($service_name eq "HANA_*" and $predefined_service =~ /^HANA_.+$/))
+		{
+			my $subs_tcp_ports_ref = &_substitute_instance_number_placeholders($config, $config->{services}->{$predefined_service}->{tcp});
+			push(@tcp_ports,@$subs_tcp_ports_ref);
+			my $subs_udp_ports_ref = &_substitute_instance_number_placeholders($config, $config->{services}->{$predefined_service}->{udp});
+			push(@udp_ports,@$subs_udp_ports_ref);
+		}
+	}
+	
+	#
+	# 2. Lookup service in /etc/services
+	#
+	my ($name, $aliases, $port_number, $protocol_name);
+	($name, $aliases, $port_number, $protocol_name) = getservbyname($service_name, "tcp");
+	push (@tcp_ports,$port_number) if ($port_number);
+	($name, $aliases, $port_number, $protocol_name) = getservbyname($service_name, "udp");
+	push (@udp_ports,$port_number) if ($port_number);
+	
+	if (!(@tcp_ports or @udp_ports)) {
+        die "ERROR: Unrecognised service name: $service_name\n";
+	}
+	
+	# Return tcp and udp ports as references to arrays separately
+	return(\@tcp_ports,\@udp_ports);
+}
+
+# Substitutes instance number placeholders (__INST_NUM__ and __INST_NUM+1__) from service port definitions
+# and expand it to all defined HANA systems
+#
+# Expects: reference to list with unsubstituted ports
+# Returns: Array with substituted ports
+sub _substitute_instance_number_placeholders
+{
+    my ($config, $unsubstituted_port_ref) = @_;
+    my @inst_nums;
+	
+    # Get an unique list of all instance numbers of all hana systems
+    foreach my $system (@{$config->{settings}->{hana_systems}})
+    {
+        $system =~ /\w{3,3}(\d{2,2})/;
+        push (@inst_nums,$1) if ($1);
+    }
+    
+    # Make unique instance number list
+    my %seen=();
+    @inst_nums = grep { ! $seen{$_} ++ } @inst_nums;
+    
+	my @substituted_ports;
+	
+	# Walk through each port entry for this service
+	foreach my $port (@$unsubstituted_port_ref)
+	{
+		# Subsitute instance number placeholders
+		if ($port =~ /__INST_NUM\+?1?__/)
+		{
+			# Expand instance numbers to all instance numbers of all hana systems
+			foreach my $inst_num (@inst_nums)
+			{
+				my $inst_num_plus_1;
+				$inst_num_plus_1 = sprintf ("%02d",$inst_num + 1);
+				my $port_subs = $port;
+				$port_subs =~ s/__INST_NUM__/$inst_num/g;
+				$port_subs =~ s/__INST_NUM\+1__/$inst_num_plus_1/g;
+				
+				push (@substituted_ports,$port_subs);
+			}
+		# Other ports & portranges are just taken over
+		} else
+		{
+			push (@substituted_ports,$port);
+		}
+	}
+	return (\@substituted_ports);
+}
+
+#
+# Map interfaces to port names
+# Populates $mappings data structure (dumped to stdout when debugging is enabled)
+sub create_interface_port_mappings
+{
+    my $config = shift;
+    my $mappings;
+	foreach my $iface_name (keys %{$config->{settings}->{interface}})
+	{
+		my $iface = $config->{settings}->{interface}->{$iface_name};
+		print STDERR "Processing network interface: $iface->{name}\n";
+		foreach my $service (@{$iface->{services}})
+		{
+			my($service_name,$network) = split(/:/,$service);
+			$network="0.0.0.0/0" if (!$network);
+			my ($tcp_ports, $udp_ports) = &_translate_service($config, $service_name);
+			push (@{$mappings->{$iface->{name}}->{$network}->{tcp}},@$tcp_ports);
+			push (@{$mappings->{$iface->{name}}->{$network}->{udp}},@$udp_ports);
+			print STDERR "- $iface->{name} allows traffic traffic: $service_name\n";
+		}
+	}
+	# print("Interface / port mappings:\n".Dumper($mappings));
+	return $mappings;
+}
+
+#
+# Setup of the iptables rules using the iptables command
+sub construct_iptables_cmds
+{
+    my ($config, $mappings) = @_;
+	my @rules;
+	
+	# Open SSH port
+	if (defined $config->{settings}->{open_all_ssh} && $config->{settings}->{open_all_ssh} eq 'yes') {
+        push (@rules,"iptables -A INPUT -p tcp --dport 22 -j ACCEPT");
+	}
+	# Open service ports
+	foreach my $iface (keys %$mappings)
+	{
+		# For all networks...
+		foreach my $network (keys %{$mappings->{$iface}})
+		{
+			# extract TCP Ports
+			foreach my $port (@{$mappings->{$iface}->{$network}->{tcp}})
+			{
+				push (@rules,"iptables -A INPUT -i $iface -s $network -p tcp --dport $port -j ACCEPT");
+			}	
+			# extract UDP Ports
+			foreach my $port (@{$mappings->{$iface}->{$network}->{udp}})
+			{
+				push (@rules,"iptables -A INPUT -i $iface -s $network -p udp --dport $port -j ACCEPT");
+			}	
+		}
+	}
+	return @rules;
+}

@@ -1,0 +1,17 @@
+## Name: NFS Server
+## Description: NFS Server service
+##
+## In order to allow access to an NFS server, you have also to set fixed
+## ports for certain NFS services in /etc/sysconfig/nfs. NFS usually uses
+## random port numbers, which leads into difficulties when having
+## restrictive firewalls enabled.
+#
+# MOUNTD_PORT=”10050″
+# STATD_PORT=”10051″
+# LOCKD_TCPPORT=”10052″
+# LOCKD_UDPPORT=”10052″
+# RQUOTAD_PORT=”10053″
+# STATD_OUTGOING_PORT=”10054″
+#
+TCP="10050:10054 10050:10054 111 111 2049 2049"
+UDP="10050:10054 10050:10054 111 111 2049 2049"

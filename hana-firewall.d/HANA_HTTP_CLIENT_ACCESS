@@ -1,0 +1,8 @@
+## Name: HANA HTTP Client Access
+## Description: (see SAP HANA Master Guide)
+## Open ports for web browser client access to SAP HANA
+
+# space separated list of allowed TCP ports
+# xx = HANA Instance
+# TCP="80xx 43xx"
+TCP="80__INST_NUM__ 43__INST_NUM__"

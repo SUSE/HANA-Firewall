@@ -1,0 +1,8 @@
+## Name: HIGH_AVAILABILITY
+## Description: HAE
+## 21.11.2014, Ralph Roth
+
+# corosync, unicast, HAWK, csync, DLM
+TCP="5404:5408 5560 7630 30865 21064"
+# corosync, multicast
+UDP="5404:5407 15219 56052"

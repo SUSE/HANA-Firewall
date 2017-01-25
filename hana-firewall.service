@@ -1,0 +1,13 @@
+[Unit]
+Description=Automated SUSE firewall setup for SAP HANA
+After=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=true
+ExecStart=/usr/sbin/hana-firewall apply
+ExecReload=/usr/sbin/hana-firewall apply
+ExecStop=/usr/sbin/hana-firewall unapply
+
+[Install]
+WantedBy=multi-user.target

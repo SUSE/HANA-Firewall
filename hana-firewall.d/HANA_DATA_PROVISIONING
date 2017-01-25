@@ -1,0 +1,9 @@
+## Name: HANA Data Provisioning
+## Description: (see SAP HANA Master Guide)
+## This connection is used for event streaming.
+## The protocol is SQLDBC (ODBC/JDBC).
+
+# space separated list of allowed TCP ports
+# xx = HANA Instance
+# TCP="3xx15 3xx17"
+TCP="3__INST_NUM__15 3__INST_NUM__17"

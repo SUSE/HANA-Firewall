@@ -1,0 +1,9 @@
+## Name: HANA Database Client Access
+## Description: (see SAP HANA Master Guide)
+## Open ports for Application servers that use 
+## SAP HANA as a database
+
+# space separated list of allowed TCP ports
+# xx = HANA Instance
+# TCP="3xx15 3xx16"
+TCP="3__INST_NUM__15 3__INST_NUM__17"

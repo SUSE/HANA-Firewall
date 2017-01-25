@@ -1,0 +1,14 @@
+## Name: HANA Distributed Systems
+## Description: (see SAP HANA Master Guide)
+## Distributed scenarios
+## Internal network communication takes place between the 
+## hosts of a distributed system on one site. Certified
+## SAP HANA hosts contain a separate network interface 
+## card that is configured as part of a private network,
+## using separate IP addresses and ports.
+## 
+
+# space separated list of allowed TCP ports
+# xx = HANA Instance
+# TCP="3xx00 3xx01 3xx02 3xx03 3xx04 3xx05 3xx07 3xx10 3xx40:3xx99"
+TCP="3__INST_NUM__00 3__INST_NUM__01 3__INST_NUM__02 3__INST_NUM__03 3__INST_NUM__04 3__INST_NUM__05 3__INST_NUM__07 3__INST_NUM__10 3__INST_NUM__40:3__INST_NUM__99"

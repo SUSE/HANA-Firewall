@@ -1,0 +1,15 @@
+## Name: HANA System Replication
+## Description: (see SAP HANA Master Guide)
+## Distributed scenarios
+## Internal network communication takes place between the 
+## hosts of a distributed system on one site. Certified
+## SAP HANA hosts contain a separate network interface 
+## card that is configured as part of a private network,
+## using separate IP addresses and ports.
+## 
+
+# space separated list of allowed TCP ports
+# xx = HANA Instance
+# xy = HANA Instance number plus 1
+# TCP="3xy01 3xy02 3xy03 3xy04 3xy05 3xy07 3xy40:3xy99"
+TCP="3__INST_NUM+1__01 3__INST_NUM+1__02 3__INST_NUM+1__03 3__INST_NUM+1__04 3__INST_NUM+1__05 3__INST_NUM+1__07 3__INST_NUM+1__40:3__INST_NUM+1__99"

@@ -1,0 +1,11 @@
+## Name: SAP HANA studio lifecycle manager
+## Description: (see SAP HANA Master Guide)
+## "This is the connection to SAP HANA lifecycle manager via SAP Host
+## Agent. For more information about SAP HANA lifecycle manager,
+## see SAP HANA Update and Configuration Guide.
+## The protocol used for this connection is SQLDBC (ODBC/JDBC)."
+
+# space separated list of allowed TCP ports
+# xx = HANA Instance
+# TCP="1128 1129"
+TCP="1128 1129"
