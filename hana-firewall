@@ -15,6 +15,8 @@ use strict;
 use warnings;
 use Data::Dumper;
 use POSIX qw(strftime);
+use Socket;
+require "sys/ioctl.ph";
 
 # Global settings
 my $iptables_cmd = '/usr/sbin/iptables';
@@ -290,13 +292,20 @@ APPLY:
 
 # Return all network interface names.
 sub list_net_interfaces {
-    my @nic_names;
-    open my $iflist, '-|', "$ip_cmd -o link show" or die "ERROR: Failed to run ip command to list network interfaces.\n";
-    while (<$iflist>) {
-        push(@nic_names, $1) if ($_ =~ /^\d+:\s+([\w\-_]+):/);
+    socket(SOCKET, AF_INET, SOCK_DGRAM, Socket::IPPROTO_IP()) or die "socket: $!";
+    my $ifreq_size = 40;
+    my $ifreq_name = "Z16 x16";
+    my $buffer = '\0'x($ifreq_size*30);
+    my $ifclist = pack("ix4p", length $buffer, $buffer);
+    my @interfaces;
+    return @interfaces unless ioctl(SOCKET, SIOCGIFCONF(), $ifclist);
+    my $iface_len = unpack("i", $ifclist);
+    for (my $start=0; $start < $iface_len; $start+=$ifreq_size) {
+        my $ifreq = substr($buffer, $start, $ifreq_size);
+        my $ifname = unpack($ifreq_name, $ifreq);
+        push(@interfaces, $ifname);
     }
-    close $iflist;
-    return @nic_names;
+    return (@interfaces);
 }
 
 # Read firewall settings, services, and interface configuration from /etc/sysconfig/ files.
