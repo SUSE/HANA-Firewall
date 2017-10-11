@@ -1,0 +1,14 @@
+# The configuration is used by hana-firewall program.
+
+## Path:        Network/Firewall/HANA Firewall/Global Configuration
+## Type:        string
+## Default:     ""
+#
+# Space-separated list of HANA system instance numbers that will participate
+# firewall setup. For example, if there are three HANA installations called
+# "PRD01, "TST02", and "DEV03", then write down "01 02 03" in the value.
+#
+# The instance numbers will take part in generating many firewall service
+# definitions.
+#
+HANA_INSTANCE_NUMBERS=""

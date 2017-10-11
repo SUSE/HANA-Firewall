@@ -1,0 +1,66 @@
+.\"/* 
+.\" * All rights reserved
+.\" * Copyright (c) 2017 SUSE LINUX GmbH, Nuernberg, Germany.
+.\" * Authors: Howard Guo
+.\" *
+.\" * This program is free software; you can redistribute it and/or
+.\" * modify it under the terms of the GNU General Public License
+.\" * as published by the Free Software Foundation; either version 2
+.\" * of the License, or (at your option) any later version.
+.\" *
+.\" * This program is distributed in the hope that it will be useful,
+.\" * but WITHOUT ANY WARRANTY; without even the implied warranty of
+.\" * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+.\" * GNU General Public License for more details.
+.\" */
+.\" 
+.TH HANA\-FIREWALL "8" "11 Oct 2017" "" "Firewalld service generator for HANA"
+.SH NAME
+hana\-firewall - Firewalld service generator for HANA.
+
+.SH SYNOPSIS
+.B hana\-firewall
+.RB [ generate-firewalld-services " | " dry-run " | " define-new-hana-service " | " help ]
+
+.SH DESCRIPTION
+hana\-firewall is a firewall utility that takes HANA instance numbers and HANA network service definitions as input, and
+generates firewalld service definitions in XML format.
+
+The utility has been redesigned in SLES 15. In contrast to the version distributed with SLES 12, it no longer controls
+the system firewall and instead merely generates firewalld service definition files. You must associate the service
+definitions with appropriate network interfaces using firewalld itself.
+
+.SH OPTIONS
+.SS
+.TP
+.B generate-firewalld-services
+Generate firewalld service definition files (XML) for HANA instances, the instance numbers of which are specified
+in /etc/sysconfig/hana-firewall file. Previously generated XML files will be overwritten.
+
+Before the newly generated XML files are visible to firewalld, you must restart firewalld daemon. Restarting the daemon
+loses all transient configuration.
+
+.TP
+.B dry-run
+Display the firewalld service name and associated port numbers that will be generated in firewalld service XML files.
+
+.TP
+.B define-new-hana-service
+Interactively create a new HANA network service definition.
+
+.TP
+.B help
+Print a summary of command line options.
+
+.SH FILES
+hana\-firewall reads HANA instance numbers from:
+.br
+/etc/sysconfig/hana\-firewall
+
+The HANA network definitions are located in:
+.br
+/etc/hana\-firewall/*
+
+.SH AUTHOR
+.NF
+Howard Guo <hguo@suse.com>
