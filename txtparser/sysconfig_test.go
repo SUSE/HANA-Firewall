@@ -131,8 +131,8 @@ func TestSysconfig(t *testing.T) {
 	}
 	// Write array keys
 	conf.SetIntArray("INTARY_TEST", []int{12, 34})
-	conf.SetStrArray("STRARY_TEST", []string{"foo", "bar"})
-	conf.SetStrArray("STRARY_TEST2", []string{"foo", "bar"})
+	conf.SetStringArray("STRARY_TEST", []string{"foo", "bar"})
+	conf.SetStringArray("STRARY_TEST2", []string{"foo", "bar"})
 	// The converted back text should carry "new value" for LIMIT_1 and newkey.
 	if txt := conf.ToText(); txt != sysconfigMatchText {
 		fmt.Println("==================")

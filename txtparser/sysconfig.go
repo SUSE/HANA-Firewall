@@ -106,7 +106,7 @@ func (conf *Sysconfig) SetIntArray(key string, values []int) {
 }
 
 // Give a space-separated string array value to a key. If the key does not yet exist, it is created.
-func (conf *Sysconfig) SetStrArray(key string, values []string) {
+func (conf *Sysconfig) SetStringArray(key string, values []string) {
 	conf.Set(key, strings.Join(values, " "))
 }
 

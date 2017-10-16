@@ -1,0 +1,4 @@
+# HANA cockpit
+# More information may be found in the SAP knowledge base article 2389709.
+
+TCP="51021 51023"

@@ -1,0 +1,4 @@
+# HANA special support
+# The ports should be used in rare technical support scenarios. See HANA administration guide for more details.
+
+TCP="3__INST_NUM__09"

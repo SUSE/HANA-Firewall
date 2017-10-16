@@ -1,0 +1,4 @@
+# HANA data provisioning
+# Event streaming via SQLDBC (ODBC/JDBC) protocol.
+
+TCP="3__INST_NUM__15 3__INST_NUM__17"

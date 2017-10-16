@@ -1,0 +1,4 @@
+# HANA HTTP client access
+# Allow web browser access to HANA.
+
+TCP="80__INST_NUM__ 43__INST_NUM__"

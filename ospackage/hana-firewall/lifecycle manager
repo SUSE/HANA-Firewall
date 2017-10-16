@@ -1,0 +1,4 @@
+# HANA studio lifecycle manager
+# Allow connection to HANA lifecycle manager via host agent.
+
+TCP="1128 1129"
