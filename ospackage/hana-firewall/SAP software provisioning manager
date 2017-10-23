@@ -1,0 +1,4 @@
+# Software provisioning manager
+# The port 4237 will alow web browsers to access software provisioning web UI remotely.
+
+TCP="4237"
