@@ -3,7 +3,7 @@ package model
 import (
 	"bytes"
 	"fmt"
-	"github.com/HouzuoGuo/HANA-Firewall/txtparser"
+	"github.com/SUSE/HANA-Firewall/txtparser"
 	"sort"
 	"strconv"
 	"strings"
