@@ -1,7 +1,7 @@
 package model
 
 import (
-	"github.com/HouzuoGuo/HANA-Firewall/txtparser"
+	"github.com/SUSE/HANA-Firewall/txtparser"
 	"reflect"
 	"testing"
 )

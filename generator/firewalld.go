@@ -2,7 +2,7 @@ package generator
 
 import (
 	"fmt"
-	"github.com/HouzuoGuo/HANA-Firewall/model"
+	"github.com/SUSE/HANA-Firewall/model"
 	"io/ioutil"
 	"os"
 	"path"

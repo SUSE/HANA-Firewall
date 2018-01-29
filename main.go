@@ -3,9 +3,9 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"github.com/HouzuoGuo/HANA-Firewall/generator"
-	"github.com/HouzuoGuo/HANA-Firewall/model"
-	"github.com/HouzuoGuo/HANA-Firewall/txtparser"
+	"github.com/SUSE/HANA-Firewall/generator"
+	"github.com/SUSE/HANA-Firewall/model"
+	"github.com/SUSE/HANA-Firewall/txtparser"
 	"io/ioutil"
 	"log"
 	"os"
