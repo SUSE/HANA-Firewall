@@ -27,8 +27,7 @@ Usage:
 	# hana-firewall define-new-hana-service
 		Interactively create a new HANA network service definition.
 	# hana-firewall help
-		Display this help message.
-`)
+		Display this help message.`)
 	os.Exit(exitStatus)
 }
 
