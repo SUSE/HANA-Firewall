@@ -1,0 +1,19 @@
+/**
+ * File:
+ *   hana-firewall.scr
+ * Summary:
+ *   SCR Agent for reading/writing /etc/sysconfig/hana-firewall
+ * Access:
+ *   read/write
+ * Authors:
+ *   Peter Varkoly <varkoly@suse.com>
+ *
+ * Read/Sets the values defined in <tt>/etc/sysconfig/hana-firewall</tt>
+ * in an easy manner.
+ */
+.sysconfig.hana-firewall
+
+`ag_ini(
+    `SysConfigFile("/etc/sysconfig/hana-firewall")
+)
+
